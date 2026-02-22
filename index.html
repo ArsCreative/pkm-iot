@@ -6,7 +6,6 @@
   <title>Terra Monitoring</title>
 
   <script src="https://unpkg.com/lucide@latest"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
@@ -273,7 +272,7 @@
       width: 25%;
     }
 
-    /* CONTROL PANEL STYLES (NEW) */
+    /* CONTROL PANEL STYLES */
     .controlPanel {
       margin-top: 20px;
       padding-top: 15px;
@@ -388,6 +387,7 @@
 
           <div class="meta">
             <span class="chip"><i data-lucide="thermometer"></i> <span id="temp">--</span></span>
+            <span class="chip"><i data-lucide="activity"></i> ADC: <span id="adcVal">--</span></span>
             <span class="chip"><i data-lucide="clock"></i> <span id="humTime">Menunggu data…</span></span>
             <span class="chip"><i data-lucide="wifi"></i> <span id="humTopic">wemos1/iot/humidity</span></span>
           </div>
@@ -468,7 +468,7 @@
 
     const TOPIC_HUM = "wemos1/iot/humidity";
     const TOPIC_WATER = "wemos1/iot/water";
-    const TOPIC_CONTROL = "wemos1/iot/control"; // TOPIC BARU UNTUK KONTROL
+    const TOPIC_CONTROL = "wemos1/iot/control"; 
 
     // UI refs
     const dot = document.getElementById("dot");
@@ -477,6 +477,7 @@
 
     const humEl = document.getElementById("hum");
     const tempEl = document.getElementById("temp");
+    const adcEl = document.getElementById("adcVal"); // REFERENSI UI ADC BARU
     const humTimeEl = document.getElementById("humTime");
     const humBar = document.getElementById("humBar");
 
@@ -496,13 +497,11 @@
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
     function parsePayload(rawText){
-      // toleransi payload JSON tidak standar: water:ON (tanpa kutip)
       const fixed = rawText.replace(/:\s?(ON|OFF)([,\s}])/gi, ':"$1"$2');
       try { return JSON.parse(fixed); } catch { return null; }
     }
 
     function normalizeOnOff(v){
-      // dukung ON/OFF, 1/0, true/false, "1"/"0"
       const s = String(v ?? "").trim().toUpperCase();
       if (s === "ON" || s === "TRUE" || s === "1") return "ON";
       if (s === "OFF" || s === "FALSE" || s === "0") return "OFF";
@@ -510,7 +509,6 @@
     }
 
     function setConnectionState(state){
-      // state: "connecting" | "online" | "offline"
       dot.classList.remove("on", "offline");
       if (state === "online"){
         dot.classList.add("on");
@@ -579,11 +577,12 @@
       chart.update();
     }
 
-    function updateHumidityUI(h, t){
+    // FUNGSI UPDATE HUMIDITY DITAMBAH PARAMETER ADC
+    function updateHumidityUI(h, t, adc){
       const time = fmtTime();
 
       if (typeof h === "number" && !Number.isNaN(h)){
-        humEl.textContent = h.toFixed(0) + "%"; // Dibuat tanpa desimal biar bersih
+        humEl.textContent = h.toFixed(0) + "%"; 
         const w = clamp(h, 0, 100);
         humBar.style.width = w + "%";
         pushChartPoint(h);
@@ -596,6 +595,13 @@
         tempEl.textContent = t.toFixed(1) + "°C";
       } else {
         tempEl.textContent = "--";
+      }
+
+      // UPDATE TAMPILAN ADC
+      if (typeof adc === "number" && !Number.isNaN(adc)){
+        adcEl.textContent = adc;
+      } else {
+        adcEl.textContent = "--";
       }
 
       humTimeEl.textContent = "Update: " + time;
@@ -672,11 +678,11 @@
       if (topic === TOPIC_HUM) {
         const h = (obj.humidity != null) ? Number(obj.humidity) : NaN;
         const t = (obj.temp != null) ? Number(obj.temp) : NaN;
+        const adc = (obj.adc != null) ? Number(obj.adc) : NaN; // TANGKAP NILAI ADC
         const thresh = (obj.threshold != null) ? Number(obj.threshold) : null;
         
-        updateHumidityUI(h, t);
+        updateHumidityUI(h, t, adc); // LEMPAR ADC KE FUNGSI UI
 
-        // Update value di form otomatis HANYA JIKA user tidak sedang mengetik di dalam input box nya
         if (thresh !== null && document.activeElement !== thresholdInput) {
           thresholdInput.value = thresh;
           thresholdStatus.textContent = "Nilai di perangkat saat ini: " + thresh + "%";
@@ -706,10 +712,8 @@
       // Publish perintah ke ESP8266
       client.publish(TOPIC_CONTROL, payload, { qos: 1 }, (err) => {
         if (!err) {
-          // Sukses kirim
           thresholdStatus.textContent = "Perintah terkirim! Menunggu konfirmasi...";
         } else {
-          // Gagal kirim
           thresholdStatus.textContent = "Gagal mengirim jaringan sibuk.";
           thresholdStatus.style.color = "var(--danger)";
         }
