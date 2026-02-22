@@ -5,10 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Terra Monitoring</title>
 
-  <!-- Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- Chart.js (grafik realtime) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
@@ -275,6 +273,55 @@
       width: 25%;
     }
 
+    /* CONTROL PANEL STYLES (NEW) */
+    .controlPanel {
+      margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px dashed var(--border);
+    }
+    .controlLabel {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .controlFlex {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .controlInput {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: #fff;
+      padding: 8px 12px;
+      width: 75px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .controlInput:focus { border-color: var(--primary); }
+    .controlBtn {
+      background: linear-gradient(135deg, rgba(96,165,250,.9), rgba(34,211,238,.9));
+      border: none;
+      border-radius: 8px;
+      color: #070a13;
+      font-weight: bold;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: opacity 0.2s;
+    }
+    .controlBtn:hover { opacity: 0.8; }
+    .controlStatus {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
     /* Layout */
     .span6{ grid-column: span 6; }
     .span12{ grid-column: span 12; }
@@ -327,7 +374,6 @@
 
     <div class="grid">
 
-      <!-- HUM CARD -->
       <div class="card span6">
         <div class="cardInner">
           <div class="title">
@@ -352,7 +398,6 @@
         </div>
       </div>
 
-      <!-- WATER CARD -->
       <div class="card span6">
         <div class="cardInner">
           <div class="title">
@@ -375,15 +420,17 @@
             <span></span>
           </div>
 
-          <div class="meta" style="margin-top:12px">
-            <span style="color:var(--muted)">
-              ON = terlalu kering → pompa/valve nyala • OFF = lembab → mati
-            </span>
+          <div class="controlPanel">
+            <div class="controlLabel">Batas Kelembaban Pompa Menyala (%)</div>
+            <div class="controlFlex">
+              <input type="number" id="thresholdInput" class="controlInput" min="1" max="100" placeholder="--">
+              <button id="btnSetThreshold" class="controlBtn">Ubah Batas</button>
+            </div>
+            <div class="controlStatus" id="thresholdStatus">Sinkronisasi data...</div>
           </div>
-        </div>
+          </div>
       </div>
 
-      <!-- CHART -->
       <div class="card span12">
         <div class="cardInner">
           <div class="title">
@@ -421,6 +468,7 @@
 
     const TOPIC_HUM = "wemos1/iot/humidity";
     const TOPIC_WATER = "wemos1/iot/water";
+    const TOPIC_CONTROL = "wemos1/iot/control"; // TOPIC BARU UNTUK KONTROL
 
     // UI refs
     const dot = document.getElementById("dot");
@@ -437,6 +485,11 @@
     const waterDevice = document.getElementById("waterDevice");
     const waterTime = document.getElementById("waterTime");
     const waterBar = document.getElementById("waterBar");
+
+    // Refs Control Panel
+    const thresholdInput = document.getElementById("thresholdInput");
+    const btnSetThreshold = document.getElementById("btnSetThreshold");
+    const thresholdStatus = document.getElementById("thresholdStatus");
 
     // Helpers
     const fmtTime = () => new Date().toLocaleTimeString('id-ID', { hour12:false });
@@ -473,7 +526,7 @@
       }
     }
 
-    // Chart setup (no manual color setting requirement is only for python tool; here it's plain JS)
+    // Chart setup
     const MAX_POINTS = 60;
     const chartCtx = document.getElementById("humChart");
 
@@ -489,7 +542,10 @@
           data: humSeries,
           tension: 0.3,
           borderWidth: 2,
-          pointRadius: 2
+          pointRadius: 2,
+          borderColor: '#22d3ee',
+          backgroundColor: 'rgba(34,211,238,0.1)',
+          fill: true
         }]
       },
       options: {
@@ -497,13 +553,15 @@
         maintainAspectRatio: false,
         animation: false,
         plugins: {
-          legend: { display: true }
+          legend: { display: true, labels: { color: '#a3a3a3' } }
         },
         scales: {
+          x: { ticks: { color: '#a3a3a3' }, grid: { color: 'rgba(255,255,255,0.05)' } },
           y: {
             suggestedMin: 0,
             suggestedMax: 100,
-            ticks: { callback: (v) => v + '%' }
+            ticks: { callback: (v) => v + '%', color: '#a3a3a3' },
+            grid: { color: 'rgba(255,255,255,0.05)' }
           }
         }
       }
@@ -525,7 +583,7 @@
       const time = fmtTime();
 
       if (typeof h === "number" && !Number.isNaN(h)){
-        humEl.textContent = h.toFixed(1) + "%";
+        humEl.textContent = h.toFixed(0) + "%"; // Dibuat tanpa desimal biar bersih
         const w = clamp(h, 0, 100);
         humBar.style.width = w + "%";
         pushChartPoint(h);
@@ -612,10 +670,18 @@
       if (!obj) return;
 
       if (topic === TOPIC_HUM) {
-        // dukung string/number
         const h = (obj.humidity != null) ? Number(obj.humidity) : NaN;
         const t = (obj.temp != null) ? Number(obj.temp) : NaN;
+        const thresh = (obj.threshold != null) ? Number(obj.threshold) : null;
+        
         updateHumidityUI(h, t);
+
+        // Update value di form otomatis HANYA JIKA user tidak sedang mengetik di dalam input box nya
+        if (thresh !== null && document.activeElement !== thresholdInput) {
+          thresholdInput.value = thresh;
+          thresholdStatus.textContent = "Nilai di perangkat saat ini: " + thresh + "%";
+          thresholdStatus.style.color = "var(--muted)";
+        }
       }
 
       if (topic === TOPIC_WATER) {
@@ -623,6 +689,33 @@
         updateWaterUI(w, obj.device);
       }
     });
+
+    // EVENT LISTENER TOMBOL SET THRESHOLD
+    btnSetThreshold.addEventListener("click", () => {
+      const val = parseInt(thresholdInput.value);
+      if (isNaN(val) || val < 1 || val > 100) {
+        alert("Harap masukkan angka persentase antara 1 sampai 100!");
+        return;
+      }
+
+      const payload = JSON.stringify({ threshold: val });
+      
+      thresholdStatus.textContent = "Mengirim perintah ke perangkat...";
+      thresholdStatus.style.color = "var(--warn)";
+
+      // Publish perintah ke ESP8266
+      client.publish(TOPIC_CONTROL, payload, { qos: 1 }, (err) => {
+        if (!err) {
+          // Sukses kirim
+          thresholdStatus.textContent = "Perintah terkirim! Menunggu konfirmasi...";
+        } else {
+          // Gagal kirim
+          thresholdStatus.textContent = "Gagal mengirim jaringan sibuk.";
+          thresholdStatus.style.color = "var(--danger)";
+        }
+      });
+    });
+
   </script>
 </body>
 </html>
